@@ -42,7 +42,13 @@ Ports owned by other users show `?` for process/PID since `ss` cannot read them 
 
 ## How Kill works
 
-Kill targets the **port**, not the listed PID. The list is a snapshot: dev servers restart under HMR (stale PID) and some stacks hold one port from several processes (one row). `fuser -k` resolves the current holders at kill time, so all of those cases die reliably. First press sends SIGTERM; the widget re-lists and verifies — if the port survives, the status line says so and the next press escalates to SIGKILL.
+Kill targets the **port**, not the listed PID, via `kill-port.sh`:
+
+1. Resolves **all** current holders of the port at kill time (the list is a snapshot — HMR restarts make stored PIDs stale, and some stacks share one port across processes).
+2. Signals the holders **plus one level of dev-supervisor parent** (`node`/`npm`/`tsx`/`vite`/`next`/…), so supervised servers (tsx, `npm run dev`, Next.js) die instead of respawning seconds later. Shells and terminals never match the supervisor pattern, so a foreground-started server costs exactly its own process — never your shell.
+3. Re-lists and verifies. First press sends SIGTERM; if the port survives, the status line says so and the next press escalates to SIGKILL. A freed port that returns within seconds is reported as supervisor-respawned instead of silently re-listing.
+
+Kill is enabled for every numeric port, including ones whose owner `ss` cannot read — permission failures surface in the status line instead of a dead button.
 
 ## Note: applying updates
 
@@ -60,8 +66,7 @@ All standard on Omarchy. No sudo, no daemon, no extra packages.
 |------------|----------|----------|
 | `ss` (iproute2) | reading listening sockets | yes |
 | `jq` | parsing port list to JSON | yes |
-| `/proc` | process cwd lookup | yes |
-| `fuser` (psmisc) | killing by port | yes |
+| `/proc` | process cwd/name lookup | yes |
 | `xdg-open` | opening ports in browser | for Open action |
 
 ## Uninstall

@@ -29,6 +29,7 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property string helperPath: Qt.resolvedUrl("list-ports.sh").toString().replace("file://", "")
+  readonly property string killHelperPath: Qt.resolvedUrl("kill-port.sh").toString().replace("file://", "")
 
   property var ports: []
   property string filterText: ""
@@ -36,6 +37,7 @@ Panel {
   property bool cursorActive: false
   property bool loading: false
   property var pendingKill: null
+  property var lastFreed: null
   property string statusText: ""
 
   readonly property int portCount: ports.length
@@ -53,6 +55,7 @@ Panel {
     root.loading = false
     root.rebuildDisplay()
     root.verifyPendingKill()
+    root.checkRespawn()
   }
 
   function matches(row, needle) {
@@ -98,20 +101,19 @@ Panel {
     Quickshell.execDetached(["xdg-open", "http://localhost:" + row.port])
   }
 
-  // Kill by PORT, not PID: the panel list is a snapshot, so a stored PID
-  // may be stale (dev servers restart under HMR) or partial (several
-  // holders sharing one port, one row). fuser resolves the current
-  // holders at kill time. First press sends SIGTERM; if the port is
-  // still listed afterwards, the next press escalates to SIGKILL.
+  // Kill by PORT via kill-port.sh: signals all current holders plus any
+  // dev-supervisor parent (tsx, npm, vite, next...), so supervised
+  // servers die instead of respawning. First press sends SIGTERM; if the
+  // port is still listed afterwards, the next press escalates to SIGKILL.
   function killByPort(port) {
     var p = String(port || "")
     if (!/^[0-9]+$/.test(p)) return "bad port"
     var sig = (root.pendingKill && root.pendingKill.port === p) ? "KILL" : "TERM"
-    Quickshell.execDetached(["fuser", "-k", "-" + sig, p + "/tcp"])
+    Quickshell.execDetached(["bash", root.killHelperPath, p, sig])
     root.pendingKill = { port: p, signal: sig }
     root.statusText = sig === "KILL"
-      ? ("Sent SIGKILL to port " + p + " holders…")
-      : ("Sent SIGTERM to port " + p + " holders…")
+      ? ("Force-killing port " + p + " (holders + supervisor)…")
+      : ("Killing port " + p + " (holders + supervisor)…")
     refreshDelay.restart()
     return "ok"
   }
@@ -127,10 +129,29 @@ Panel {
     if (!still) {
       root.statusText = "Port " + p + " freed"
       root.pendingKill = null
+      root.lastFreed = { port: p, at: Date.now() }
     } else if (sig === "KILL") {
-      root.statusText = "Port " + p + " still listening after SIGKILL (respawning?)"
+      root.statusText = "Port " + p + " still listening after SIGKILL"
     } else {
       root.statusText = "Port " + p + " still listening — Kill again to force"
+    }
+  }
+
+  // A freed port that returns within seconds was respawned by a
+  // supervisor the kill script could not see (grandparent watcher,
+  // container runtime, ...). Say so instead of silently re-listing.
+  function checkRespawn() {
+    if (!root.lastFreed) return
+    var p = root.lastFreed.port
+    var back = false
+    for (var i = 0; i < root.ports.length; i++) {
+      if (String(root.ports[i].port) === p) { back = true; break }
+    }
+    if (back && Date.now() - root.lastFreed.at < 12000) {
+      root.statusText = "Port " + p + " is back — a supervisor respawned it"
+      root.lastFreed = null
+    } else if (!back && Date.now() - root.lastFreed.at >= 12000) {
+      root.lastFreed = null
     }
   }
 
@@ -462,7 +483,7 @@ Panel {
               Button {
                 id: killBtn
                 anchors.verticalCenter: parent.verticalCenter
-                enabled: /^\d+$/.test(rowItem.pid)
+                enabled: /^\d+$/.test(rowItem.port)
                 text: "Kill"
                 bordered: true
                 foreground: (rowItem.hasCursor || rowMouse.containsMouse) ? root.selectedText : root.foreground
