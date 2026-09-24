@@ -11,8 +11,10 @@ import qs.Ui
 // port / process / pid / cwd with Open + Kill per row.
 //
 // Keys (when filter field is NOT focused):
-//   j/k or arrows  move · enter open · x / ctrl+k kill
+//   j/k or arrows  move · enter open · x / ctrl+k kill (again = force)
 //   r refresh · esc clear filter, then close
+// Kill targets the port (all current holders), not the listed PID,
+// so stale PIDs and multi-holder ports die reliably.
 // When the filter field is focused, typing filters normally.
 Panel {
   id: root
@@ -33,6 +35,8 @@ Panel {
   property int selectedIndex: 0
   property bool cursorActive: false
   property bool loading: false
+  property var pendingKill: null
+  property string statusText: ""
 
   readonly property int portCount: ports.length
 
@@ -48,6 +52,7 @@ Panel {
     root.ports = parsed
     root.loading = false
     root.rebuildDisplay()
+    root.verifyPendingKill()
   }
 
   function matches(row, needle) {
@@ -93,12 +98,46 @@ Panel {
     Quickshell.execDetached(["xdg-open", "http://localhost:" + row.port])
   }
 
+  // Kill by PORT, not PID: the panel list is a snapshot, so a stored PID
+  // may be stale (dev servers restart under HMR) or partial (several
+  // holders sharing one port, one row). fuser resolves the current
+  // holders at kill time. First press sends SIGTERM; if the port is
+  // still listed afterwards, the next press escalates to SIGKILL.
+  function killByPort(port) {
+    var p = String(port || "")
+    if (!/^[0-9]+$/.test(p)) return "bad port"
+    var sig = (root.pendingKill && root.pendingKill.port === p) ? "KILL" : "TERM"
+    Quickshell.execDetached(["fuser", "-k", "-" + sig, p + "/tcp"])
+    root.pendingKill = { port: p, signal: sig }
+    root.statusText = sig === "KILL"
+      ? ("Sent SIGKILL to port " + p + " holders…")
+      : ("Sent SIGTERM to port " + p + " holders…")
+    refreshDelay.restart()
+    return "ok"
+  }
+
+  function verifyPendingKill() {
+    if (!root.pendingKill) return
+    var p = root.pendingKill.port
+    var sig = root.pendingKill.signal
+    var still = false
+    for (var i = 0; i < root.ports.length; i++) {
+      if (String(root.ports[i].port) === p) { still = true; break }
+    }
+    if (!still) {
+      root.statusText = "Port " + p + " freed"
+      root.pendingKill = null
+    } else if (sig === "KILL") {
+      root.statusText = "Port " + p + " still listening after SIGKILL (respawning?)"
+    } else {
+      root.statusText = "Port " + p + " still listening — Kill again to force"
+    }
+  }
+
   function killSelected() {
     var row = root.selectedRow()
     if (!row) return
-    if (!/^[0-9]+$/.test(row.pid)) return
-    killProc.command = ["kill", row.pid]
-    killProc.running = true
+    root.killByPort(row.port)
   }
 
   visible: true
@@ -130,11 +169,6 @@ Panel {
       }
       root.loadPorts(listOut.text)
     }
-  }
-
-  Process {
-    id: killProc
-    onExited: refreshDelay.restart()
   }
 
   Timer {
@@ -460,8 +494,21 @@ Panel {
         }
 
         Text {
+          visible: root.statusText !== ""
           width: parent.width
-          text: "enter open · x / ctrl+k kill · r refresh · esc close"
+          text: root.statusText
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          horizontalAlignment: Text.AlignHCenter
+          elide: Text.ElideRight
+          wrapMode: Text.WordWrap
+        }
+
+        Text {
+          width: parent.width
+          text: "enter open · x / ctrl+k kill (again = force) · r refresh · esc close"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

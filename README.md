@@ -14,7 +14,7 @@ Local dev-server manager for the Omarchy bar.
 |-----|--------|
 | type in filter box | Filter by port / process / directory |
 | `enter` / click row / Open | Open `http://localhost:<port>` |
-| `x`, `ctrl+k`, or Kill button | Kill owning process, then refresh |
+| `x`, `ctrl+k`, or Kill button | Kill everything on the port (SIGTERM; press again to force SIGKILL) |
 | `r` / `ctrl+r` | Refresh list |
 | `j`/`k` or arrows | Move selection |
 | `esc` | Clear filter, then close |
@@ -40,6 +40,18 @@ The widget runs `list-ports.sh` (an `ss -tlnp` wrapper emitting JSON) on open, e
 
 Ports owned by other users show `?` for process/PID since `ss` cannot read them without root — Kill is disabled for those rows.
 
+## How Kill works
+
+Kill targets the **port**, not the listed PID. The list is a snapshot: dev servers restart under HMR (stale PID) and some stacks hold one port from several processes (one row). `fuser -k` resolves the current holders at kill time, so all of those cases die reliably. First press sends SIGTERM; the widget re-lists and verifies — if the port survives, the status line says so and the next press escalates to SIGKILL.
+
+## Note: applying updates
+
+Edits to a mounted bar widget's QML do not hot-reload — after `omarchy plugin update` (or hand-editing files), run:
+
+```bash
+omarchy restart shell
+```
+
 ## Dependencies
 
 All standard on Omarchy. No sudo, no daemon, no extra packages.
@@ -49,6 +61,7 @@ All standard on Omarchy. No sudo, no daemon, no extra packages.
 | `ss` (iproute2) | reading listening sockets | yes |
 | `jq` | parsing port list to JSON | yes |
 | `/proc` | process cwd lookup | yes |
+| `fuser` (psmisc) | killing by port | yes |
 | `xdg-open` | opening ports in browser | for Open action |
 
 ## Uninstall
