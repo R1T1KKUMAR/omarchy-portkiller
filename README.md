@@ -40,6 +40,17 @@ The widget runs `list-ports.sh` (an `ss -tlnp` wrapper emitting JSON) on open, e
 
 Ports owned by other users show `?` for process/PID since `ss` cannot read them without root — Kill is disabled for those rows.
 
+## Dependencies
+
+All standard on Omarchy. No sudo, no daemon, no extra packages.
+
+| Dependency | Used for | Required |
+|------------|----------|----------|
+| `ss` (iproute2) | reading listening sockets | yes |
+| `jq` | parsing port list to JSON | yes |
+| `/proc` | process cwd lookup | yes |
+| `xdg-open` | opening ports in browser | for Open action |
+
 ## Uninstall
 
 ```bash
