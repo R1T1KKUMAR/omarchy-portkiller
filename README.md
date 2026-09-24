@@ -22,7 +22,7 @@ Local dev-server manager for the Omarchy bar.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/omarchy-portkiller --enable
+omarchy plugin add https://github.com/R1T1KKUMAR/omarchy-portkiller --enable
 omarchy bar put dev.ritik.portkiller --section right
 ```
 
